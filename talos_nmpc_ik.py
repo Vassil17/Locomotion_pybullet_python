@@ -143,14 +143,14 @@ if Freebase:
     addFreeFlyerJointLimits(robot)
 else:
     robot = RobotWrapper.BuildFromURDF(urdf_filename, mesh_dir)
-### explore the model class
-# for name, function in robot.model.__class__.__dict__.items():
-#     print(' **** %s: %s' % (name, function.__doc__))
-# print('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$444' )
-# print('standard model: dim=' + str(len(robot.model.joints)))
-# for jn in robot.model.joints:
-#     print(jn)
-# print('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$' )
+## explore the model class
+for name, function in robot.model.__class__.__dict__.items():
+    print(' **** %s: %s' % (name, function.__doc__))
+print('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$444' )
+print('standard model: dim=' + str(len(robot.model.joints)))
+for jn in robot.model.joints:
+    print(jn)
+print('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$' )
 
 # find lower-leg joint idx in pinocchio
 joints_desired_l = ['leg_left_1_joint','leg_left_2_joint','leg_left_3_joint', 'leg_left_4_joint', 'leg_left_5_joint','leg_left_6_joint']
