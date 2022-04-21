@@ -36,7 +36,6 @@ import subprocess
 
 import scipy
 
-############################################## main loop function definition ###########################################
 ################################ pinocchio urdf setup ##################################
 def addFreeFlyerJointLimits(robot):
     rmodel = robot.model
@@ -84,7 +83,7 @@ def run_nmpc_external_ext(j,cpptest):
 
     return donser
 
-############## IK computing
+############## IK computing ####################################################################
 def joint_lower_leg_ik(robot,oMdesl,JOINT_IDl,oMdesr,JOINT_IDr,Freebase,Homing_pose):
     ############ IK-solution ###############################################################33
     IK_left_leg = CLIK(robot, oMdesl, JOINT_IDl, Freebase)
@@ -124,10 +123,9 @@ global pl_homing
 ############################################################################### robot setup ###############
 ########whold-body simu:
 Full_body_simu = True
-##########for robot with float-base: humanoids or ################################
+##########for robot with float-base ################################
 Freebase = True
 
-#mesh_dir = '/home/jiatao/anaconda3/envs/nameOfEnv/pybullet_gym/talos'
 mesh_dir = str(Path(__file__).parent.absolute())
 
 # You should change here to set up your own URDF file
@@ -287,7 +285,7 @@ angle_feedback_det= [0,0,0]
 angle_ref_det_pre= [0,0,0]
 angle_feedback_det_pre= [0,0,0]
 
-############################################################################################# main loop for robot gait generation and control ##########################################
+####################################### main loop for robot gait generation and control ##########################################
 while i<FileLength:
     if (useRealTimeSimulation):
         # dt = datetime.now()
@@ -336,7 +334,7 @@ while i<FileLength:
 
         support_flag[i] = 0  ### 0, double support, right support
 
-        ###################state feedbacke ###########################################
+        ###################state feedback ###########################################
         gcom_m, right_sole_pos, left_sole_pos, base_pos_m, base_angle_m, right_ankle_force, left_ankle_force, gcop_m, support_flag, dcm_pos_m, com_vel_m,links_pos, links_vel, links_acc = \
         Controller_ver.state_estimation(i,dt,support_flag,links_pos_prev,links_vel_prev,gcom_pre)
 
@@ -357,7 +355,7 @@ while i<FileLength:
         com_feedback_base = gcom_m
         com_ref_base = base_pos_m
     else:
-        ###################state feedbacke ###########################################
+        ###################state feedback ###########################################
         gcom_m, right_sole_pos, left_sole_pos, base_pos_m, base_angle_m, right_ankle_force, left_ankle_force, gcop_m, support_flag, dcm_pos_m, com_vel_m,links_pos, links_vel, links_acc = \
         Controller_ver.state_estimation(i,dt,support_flag,links_pos_prev,links_vel_prev,gcom_pre)
 
