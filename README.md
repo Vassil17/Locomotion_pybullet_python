@@ -1,4 +1,4 @@
-# locomotion_nmpc_pybullet_python
+# locomotion_pybullet_python
 
 Build the pybullet simulation environment for legged robots motion planning and control(coding by python.3.6)
 
