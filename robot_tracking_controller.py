@@ -10,6 +10,9 @@ class Gait_Controller:
         self.id = id
         self.mass = urbodx.getRobotMass()
         self.jointnumber = urbodx.getNumJoints()  #####note that the jointnumber equals to the linkname when the base_link is not count
+        self.jointactuatednumber = urbodx.getNumActuatedJoints()
+        self.jointactuatedindex = urbodx.getActuatedJointIndexes()
+        self.Link_name_index_dict = urbodx.getLinkIndexNameMap()
         self.g = 9.8
         if verbose:
             print('*' * 100 + '\nPyBullet Controller Info ' + '\u2193 ' * 20 + '\n' + '*' * 100)
@@ -18,6 +21,27 @@ class Gait_Controller:
             print('urbodx.ID:              ', xxx)
             print('robot mass:              ', self.mass)
             print('*' * 100 + '\nPyBullet Controller Info ' + '\u2191 ' * 20 + '\n' + '*' * 100)
+
+        # self.FR_soleid = self.jointactuatedindex[3]+1
+        # self.FL_soleid = self.jointactuatedindex[7]+1
+        # self.RR_soleid = self.jointactuatedindex[11]+1
+        # self.RL_soleid = self.jointactuatedindex[15]+1
+        ### for origin_urdf file
+        self.FR_soleid = self.jointactuatedindex[2]+1
+        self.FL_soleid = self.jointactuatedindex[5]+1
+        self.RR_soleid = self.jointactuatedindex[8]+1
+        self.RL_soleid = self.jointactuatedindex[11]+1
+
+        pybullet.enableJointForceTorqueSensor(bodyUniqueId=self.id, jointIndex=self.FR_soleid, enableSensor=1)
+        pybullet.enableJointForceTorqueSensor(bodyUniqueId=self.id, jointIndex=self.FL_soleid, enableSensor=1)
+        pybullet.enableJointForceTorqueSensor(bodyUniqueId=self.id, jointIndex=self.RR_soleid, enableSensor=1)
+        pybullet.enableJointForceTorqueSensor(bodyUniqueId=self.id, jointIndex=self.RL_soleid, enableSensor=1)
+
+        self.FR_sensor = []
+        self.FL_sensor = []
+        self.RR_sensor = []
+        self.RL_sensor = []
+
 
     def read_data_offline(self, FilePathName):
         Input = open(FilePathName, 'r')
@@ -36,15 +60,33 @@ class Gait_Controller:
 
         return data
 
-    def state_estimation(self, i, dt, support_flag, links_pos_prev, links_vel_prev, gcom_pre):
-        gcom, right_sole_pos, left_sole_pos, base_pos, base_angle = self.cal_com_state()
-        right_ankle_force, left_ankle_force = self.ankle_joint_pressure()
-        links_pos, links_vel, links_acc = self.get_link_vel_vol(i, dt, links_pos_prev, links_vel_prev)
-        gcop, support_flag, dcm_pos, com_vel = self.cal_cop(i, support_flag, links_pos, links_acc, right_ankle_force,
-                                                            left_ankle_force, right_sole_pos, left_sole_pos, gcom_pre,
-                                                            gcom, dt)
+    # def get_acutated_joint_pos_vel(self):
+    #     acutated_joint_pos = []
+    #     acutated_joint_vel = []
+    #
+    #     for i in range(0,self.jointactuatednumber):
+    #         acutated_joint_pos.append(self.robot.getActuatedJointNames(self.id, self.jointactuatedindex[i])[0])
+    #         acutated_joint_vel.append(self.robot.getActuatedJointNames(self.id, self.jointactuatedindex[i])[1])
+    #
+    #
+    #     return acutated_joint_pos, acutated_joint_vel
+            
+            
+            
 
-        return gcom, right_sole_pos, left_sole_pos, base_pos, base_angle, right_ankle_force, left_ankle_force, gcop, support_flag, dcm_pos, com_vel,links_pos, links_vel, links_acc
+
+    def state_estimation(self, i, dt, support_flag, links_pos_prev, links_vel_prev, gcom_pre):
+        ### CoM position######
+        gcom, FR_sole_pose, FL_sole_pose, RR_sole_pose, RL_sole_pose, base_pos, base_angle = self.cal_com_state()
+
+        self.ankle_joint_pressure()
+
+        links_pos, links_vel, links_acc = self.get_link_vel_vol(i, dt, links_pos_prev, links_vel_prev)
+        # gcop, support_flag, dcm_pos, com_vel = self.cal_cop(i, support_flag, links_pos, links_acc, right_ankle_force,
+        #                                                     left_ankle_force, right_sole_pos, left_sole_pos, gcom_pre,
+        #                                                     gcom, dt)
+
+        return gcom, FR_sole_pose, FL_sole_pose, RR_sole_pose, RL_sole_pose, base_pos, base_angle, self.FR_sensor, self.FL_sensor, self.RR_sensor, self.RL_sensor, links_pos, links_vel, links_acc
 
     ####### state feedback and recomputation#####################################
     ###### com state, foot location, baseposition and orientation===========================
@@ -69,25 +111,30 @@ class Gait_Controller:
         com_pos[2] = total_mass_moment[2] / self.mass
 
         ###### footsole position: eliminating the offset
-        right_sole_pos = list(pybullet.getLinkState(self.id, self.jointnumber - 1)[0])
-        right_sole_pos[2] -= 0.0013
-        left_sole_pos = list(pybullet.getLinkState(self.id, self.jointnumber - 8)[0])
-        left_sole_pos[2] -= 0.00129
+        ###### using the fact the linkid = jointid
+        FR_sole_link_id = self.Link_name_index_dict.get('FR_foot_sole')
+        FL_sole_link_id = self.Link_name_index_dict.get('FL_foot_sole')
+        RR_sole_link_id = self.Link_name_index_dict.get('RR_foot_sole')
+        RL_sole_link_id = self.Link_name_index_dict.get('RL_foot_sole')
 
+        FR_sole_pose = list(pybullet.getLinkState(self.id, self.FR_soleid)[0])
+        FL_sole_pose = list(pybullet.getLinkState(self.id, self.FL_soleid)[0])
+        RR_sole_pose = list(pybullet.getLinkState(self.id, self.RR_soleid)[0])
+        RL_sole_pose = list(pybullet.getLinkState(self.id, self.RL_soleid)[0])
 
         base_angle = pybullet.getEulerFromQuaternion(base_orn)
 
-        return com_pos, right_sole_pos, left_sole_pos, base_link_pos, base_angle
+        return com_pos, FR_sole_pose, FL_sole_pose, RR_sole_pose, RL_sole_pose, base_link_pos, base_angle
 
-    ###### multilink model for ZMP and DCM calculation: kajita et al.  introduction to humanoid robots
-    #### ankle joint force/torque sensor
+
+    ####### ankle joint force/torque sensor
     def ankle_joint_pressure(self):
-        rig_legid = self.jointnumber - 2
-        left_legid = self.jointnumber - 9
-        right_leg_6_joint_info = pybullet.getJointState(bodyUniqueId=self.id, jointIndex=rig_legid)[2]
-        left_leg_6_joint_info = pybullet.getJointState(bodyUniqueId=self.id, jointIndex=left_legid)[2]
+        self.FR_sensor = pybullet.getJointState(bodyUniqueId=self.id, jointIndex=self.FR_soleid)[2]
+        self.FL_sensor = pybullet.getJointState(bodyUniqueId=self.id, jointIndex=self.FL_soleid)[2]
+        self.RR_sensor = pybullet.getJointState(bodyUniqueId=self.id, jointIndex=self.RR_soleid)[2]
+        self.RL_sensor = pybullet.getJointState(bodyUniqueId=self.id, jointIndex=self.RL_soleid)[2]
 
-        return right_leg_6_joint_info, left_leg_6_joint_info
+
 
     ##### getlink velocity and acceleration
     def get_link_vel_vol(self, i, dt, links_pos_pre, links_vel_pre):

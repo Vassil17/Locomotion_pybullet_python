@@ -78,7 +78,7 @@ class Table:
         print("Updated table dynamic: ", pybullet.getDynamicsInfo(self.id, -1))
 
 class SimEnv:
-    def __init__(self, sim_rate=1000, g=9.81, real_time_sim=True):
+    def __init__(self, sim_rate=200, g=9.81, real_time_sim=True):
         self.sim_rate = sim_rate
         self.sim_time_step = 1.0 / self.sim_rate
         self.real_time_sim = real_time_sim

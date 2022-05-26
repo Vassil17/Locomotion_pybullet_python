@@ -392,7 +392,7 @@ while i<FileLength:
             # oMdesr = pin.SE3(np.eye(3), des_pr)
             ################################################### NMPC gait generation #####################################################
             j = i + 1- round(t_homing/dt)
-            cpptest = "/home/jiatao/Dropbox/nmpc_pybullet/build/src/MPC_WALK.exe"  # in linux without suffix .exe
+            cpptest = "/home/jiatao/Documents/locomotion_nmpc_pybullet-main/build/src/MPC_WALK.exe"  # in linux without suffix .exe
             donser = run_nmpc_external_ext(j,cpptest)
 
             if len(donser) == 12:

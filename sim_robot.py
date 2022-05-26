@@ -24,7 +24,7 @@ class ControlMode:
 
 
 class SimRobot:
-    def __init__(self, urdfFileName, basePosition=[0,0,0], baseRPY=[0,0,0], jointPositions=None, useFixedBase=False, verbose=True):
+    def __init__(self, urdfFileName, basePosition=[0,0,0], baseRPY=[0,0,0], jointPositions=None, useFixedBase=False, verbose=True, Torquecontrol=True):
 
         self.id = pybullet.loadURDF(fileName=urdfFileName,
                                     basePosition=basePosition,
@@ -50,14 +50,16 @@ class SimRobot:
             print('joint frictions:       ', self.getJointFrictions())
             print('*' * 100 + '\nPyBullet Robot Info ' + '\u2191 '*20 + '\n' + '*' * 100)
 
-
-        # self.enableTorqueControl()
-        self.enablePositionControl()
+        if(Torquecontrol):
+            self.enableTorqueControl()
+        else:
+            self.enablePositionControl()
 
         self.addDebugLinkFrames()
 
         if jointPositions is None:
-            self.resetJointStates(np.zeros(self.getNumJoints()))
+            self.resetJointStates(np.zeros(self.getNumActuatedJoints()))
+            # self.resetJointStates(np.zeros(self.getNumJoints()))
         else:
             self.resetJointStates(jointPositions)
 
@@ -345,11 +347,18 @@ class SimRobot:
 
     def getActuatedJointPositions(self):
         actuatedJointPositions = np.array([state[0] for state in pybullet.getJointStates(self.id, self.getActuatedJointIndexes())])
-        return dict(zip(self.getActuatedJointNames(), actuatedJointPositions))
+        # return dict(zip(self.getActuatedJointNames(), actuatedJointPositions))
+        return actuatedJointPositions
 
     def getActuatedJointVelocities(self):
         actuatedJointVelocities = np.array([state[1] for state in pybullet.getJointStates(self.id, self.getActuatedJointIndexes())])
-        return dict(zip(self.getActuatedJointNames(), actuatedJointVelocities))
+        #return dict(zip(self.getActuatedJointNames(), actuatedJointVelocities))
+        return actuatedJointVelocities
+
+    def getActuatedJointtorques(self):
+        actuatedJointtorques = np.array([state[3] for state in pybullet.getJointStates(self.id, self.getActuatedJointIndexes())])
+        # return dict(zip(self.getActuatedJointNames(), actuatedJointtorques))
+        return actuatedJointtorques
 
     def getActuatedJointStates(self):
         actuatedJointStates = [state[:2] for state in pybullet.getJointStates(self.id, self.getActuatedJointIndexes())]
