@@ -21,6 +21,7 @@ class ForceCtrl:
 
     def torque_cmd(self,leg_support,J_leg, F_leg,q_ref, q_mea, dq_ref, dq_mea,p_ref, p_mea, dp_ref, dp_mea,Gravity_comp):
         torque_cmd = np.array([0,0,0])
+        ###### Noting: it should be noted that we can still taking the stance leg as swing leg through considering the relative motion to CoM
         if leg_support: ###stance leg
             torque_ff = self.stance_leg_forward(J_leg, F_leg)
         else: ###swing leg
@@ -31,6 +32,9 @@ class ForceCtrl:
 
         for i in range(0,3):
             torque_cmd[i] = torque_ff[i,0] + joint_track_torque[i] + Gra_comp[i]
+
+        # for i in range(0,3): #### using the real angle to calcualte leg Jacobian: not working, it turns out that the joint angle Feedback is indispensible
+        #     torque_cmd[i] = torque_ff[i,0]
 
         return torque_cmd
 
@@ -43,8 +47,14 @@ class ForceCtrl:
         return torque_ff
 
     def swing_leg_forward(self, J_leg, p_ref, p_mea, dp_ref, dp_mea):
+
         F_statence = self.kpCartesian * (p_ref - p_mea) + self.kdCartesian * (dp_ref - dp_mea)
-        torque_ff = -np.dot(J_leg.T, F_statence)
+        F_det = np.zeros([3,1])
+        F_det[0, 0] = F_statence[0]
+        F_det[1, 0] = F_statence[1]
+        F_det[2, 0] = F_statence[2]
+        torque_ff = np.dot(J_leg.T, F_det)
+
         return torque_ff
 
     def Joint_track_fb(self,q_ref, q_mea, dq_ref, dq_mea):

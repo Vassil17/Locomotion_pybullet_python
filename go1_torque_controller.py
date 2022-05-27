@@ -589,10 +589,14 @@ while i<=3*n_t_homing:
 
                 ########### Ik ###############################
                 body_R_des = np.zeros([3, 1])
-                q_FR, J_FR = IK_leg.ik_close_form(des_base, body_R_des, des_FR_p, q_FR, 0, It_max =15, lamda=0.55)
-                q_FL, J_FL = IK_leg.ik_close_form(des_base, body_R_des, des_FL_p, q_FL, 1, It_max=15, lamda=0.55)
-                q_RR, J_RR = IK_leg.ik_close_form(des_base, body_R_des, des_RR_p, q_RR, 2, It_max =15, lamda=0.55)
-                q_RL, J_RL = IK_leg.ik_close_form(des_base, body_R_des, des_RL_p, q_RL, 3, It_max=15, lamda=0.55)
+                # q_FR, J_FR = IK_leg.ik_close_form(des_base, body_R_des, des_FR_p, q_FR, 0, It_max =15, lamda=0.55)
+                # q_FL, J_FL = IK_leg.ik_close_form(des_base, body_R_des, des_FL_p, q_FL, 1, It_max=15, lamda=0.55)
+                # q_RR, J_RR = IK_leg.ik_close_form(des_base, body_R_des, des_RR_p, q_RR, 2, It_max =15, lamda=0.55)
+                # q_RL, J_RL = IK_leg.ik_close_form(des_base, body_R_des, des_RL_p, q_RL, 3, It_max=15, lamda=0.55)
+                q_FR, xx = IK_leg.ik_close_form(des_base, body_R_des, des_FR_p, q_FR, 0, It_max =15, lamda=0.55)
+                q_FL, xx = IK_leg.ik_close_form(des_base, body_R_des, des_FL_p, q_FL, 1, It_max=15, lamda=0.55)
+                q_RR, xx = IK_leg.ik_close_form(des_base, body_R_des, des_RR_p, q_RR, 2, It_max =15, lamda=0.55)
+                q_RL, xx = IK_leg.ik_close_form(des_base, body_R_des, des_RL_p, q_RL, 3, It_max=15, lamda=0.55)
                 Q_cmd[0:3,i-1] = q_FR[0:3]
                 Q_cmd[3:6,i-1] = q_FL[0:3]
                 Q_cmd[6:9,i-1] = q_RR[0:3]
@@ -614,13 +618,13 @@ while i<=3*n_t_homing:
 
                 ###############
                 torque_FR = Force_controller.torque_cmd(FR_support,J_FR, Force_FR,q_cmd[0:3], q_mea[0:3], q_vel_cmd[0:3], dq_mea[0:3],
-                                                        Relative_FR_pos[0:3], Relative_FR_pos_mea[0:3], Relative_FR_vel[0:3], Relative_FR_vel_mea[0:3],Gravity_comp[0:3])
+                                                        Relative_FR_pos, Relative_FR_pos_mea, Relative_FR_vel, Relative_FR_vel_mea,Gravity_comp[0:3])
                 torque_FL = Force_controller.torque_cmd(FL_support,J_FL, Force_FL,q_cmd[3:6], q_mea[3:6], q_vel_cmd[3:6], dq_mea[3:6],
-                                                        Relative_FR_pos[3:6], Relative_FR_pos_mea[3:6], Relative_FR_vel[3:6], Relative_FR_vel_mea[3:6],Gravity_comp[3:6])
+                                                        Relative_FL_pos, Relative_FL_pos_mea, Relative_FL_vel, Relative_FL_vel_mea,Gravity_comp[3:6])
                 torque_RR = Force_controller.torque_cmd(RR_support,J_RR, Force_RR,q_cmd[6:9], q_mea[6:9], q_vel_cmd[6:9], dq_mea[6:9],
-                                                        Relative_FR_pos[6:9], Relative_FR_pos_mea[6:9], Relative_FR_vel[6:9], Relative_FR_vel_mea[6:9],Gravity_comp[6:9])
+                                                        Relative_RR_pos, Relative_RR_pos_mea, Relative_RR_vel, Relative_RR_vel_mea,Gravity_comp[6:9])
                 torque_RL = Force_controller.torque_cmd(FL_support,J_RL, Force_RL,q_cmd[9:12], q_mea[9:12], q_vel_cmd[9:12], dq_mea[9:12],
-                                                        Relative_FR_pos[9:12], Relative_FR_pos_mea[9:12], Relative_FR_vel[9:12], Relative_FR_vel_mea[9:12],Gravity_comp[9:12])
+                                                        Relative_RL_pos, Relative_RL_pos_mea, Relative_RL_vel, Relative_RL_vel_mea,Gravity_comp[9:12])
                 # ################################### send torque command #################################
                 Torque_cmd[0:3, i - 1] = torque_FR[0:3]
                 Torque_cmd[3:6, i - 1] = torque_FL[0:3]
