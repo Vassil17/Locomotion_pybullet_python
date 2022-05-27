@@ -5,9 +5,9 @@ import copy
 import os
 from os.path import dirname, join, abspath
 import sys
+import platform
 
 from pathlib import Path
-
 
 ### pinocchio
 import pinocchio as pin
@@ -15,8 +15,9 @@ from pinocchio.explog import log
 from pinocchio.robot_wrapper import RobotWrapper
 from pinocchio.utils import *
 from pino_robot_ik import CLIK                        #### IK solver
-from robot_tracking_controller import Gait_Controller #### controller
+from robot_tracking_controller import Gait_Controller #### State estimate
 from LIP_motion_planner import Gait                   #### Gait planner
+from robot_dynamics import ForceCtrl                  #### Force controller
 
 ##### numpy
 import numpy as np
@@ -139,6 +140,7 @@ Full_body_simu = True
 Freebase = True
 
 mesh_dir = str(Path(__file__).parent.absolute())
+print("mesh_dir:",mesh_dir)
 
 # You should change here to set up your own URDF file
 if Full_body_simu:
@@ -153,13 +155,15 @@ if Freebase:
     addFreeFlyerJointLimits(robot)
 else:
     robot = RobotWrapper.BuildFromURDF(urdf_filename, mesh_dir)
-## explore the model class
-for name, function in robot.model.__class__.__dict__.items():
-    print(' **** %s: %s' % (name, function.__doc__))
-print('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$444' )
-print('standard model: dim=' + str(len(robot.model.joints)))
-for jn in robot.model.joints:
-    print(jn)
+
+####### only for debug check #########################################
+# ## explore the model class
+# for name, function in robot.model.__class__.__dict__.items():
+#     print(' **** %s: %s' % (name, function.__doc__))
+# print('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$444' )
+# print('standard model: dim=' + str(len(robot.model.joints)))
+# for jn in robot.model.joints:
+#     print(jn)
 print('$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$' )
 
 # find lower-leg joint idx in pinocchio;
@@ -184,55 +188,42 @@ print("RL leg joint id in pinocchio",idRL)
 
 ##### reset base pos and orn,  only workable in floating-based model
 # robot.model.jointPlacements[1] = pin.SE3(np.eye(3), np.array([1,0.5,0.8]))
-
 q = robot.q0
-
 print("q:", q)
 
 ############################### pinocchio load finish !!!!!!!!!!!!!!!!!!!!!!!!!!! #####################################################
-print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!pinocchio load urdf finishing!!!!!!!!!!!!!!!!!!!!!!!!!!")
+print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!pinocchio setup finishing!!!!!!!!!!!!!!!!!!!!!!!!!!")
 
-################################################### pybullet simulation loading ###########################
+################################################### pybullet simulation setup ###########################
 ### intial pose for go1 in pybullet
 sim_rate = 200
 dt = 1./sim_rate
 sim_env = SimEnv(sim_rate=sim_rate)
 
+trailDuration = 10
+prevPose = [0, 0, 0]
+prevPose1 = [0, 0, 0.446]
+hasPrevPose = 0
 urobtx = SimRobot(urdfFileName=urdf_filename,
-                 basePosition=[0, 0, 0.446],
+                 basePosition=prevPose1,
                  baseRPY=[0, 0, 0],
                  Torquecontrol = False)
 go1id = urobtx.id
 
 num_joints = urobtx.getNumJoints()
 num_actuated_joint = urobtx.getNumActuatedJoints()
+joint_perLeg = int(num_actuated_joint/4.0)
 actuation_joint_index = urobtx.getActuatedJointIndexes()
 
-Homing_pose = np.zeros(num_actuated_joint)
 ### Homing_pose: four legs:FR, FL, RR, RL####### is important for walking in place
-Homing_pose[0] =  0
-Homing_pose[1] =  0.75
-Homing_pose[2] =  -1.8
-Homing_pose[3] = 0
-Homing_pose[4] =  0.75
-Homing_pose[5] =  -1.8
-Homing_pose[6] = 0
-Homing_pose[7] =  0.75
-Homing_pose[8] =  -1.8
-Homing_pose[9] =  0
-Homing_pose[10] =  0.75
-Homing_pose[11] =  -1.8
-
-
-Homing_height_reduce = 0.1  ####bending knee
-
+Homing_pose = np.zeros(num_actuated_joint)
+for jy in range(0,4):
+    Homing_pose[jy * joint_perLeg + 0] = 0
+    Homing_pose[jy * joint_perLeg + 1] = 0.75
+    Homing_pose[jy * joint_perLeg + 2] = -1.8
 print("Homing_pose:",Homing_pose)
 
-
-# q_initial = np.zeros(num_actuated_joint)
-# for i in range(0, num_actuated_joint):
-#     q_initial[i] = Homing_pose[i]*0.01
-# urobtx.resetJointStates(q_initial)
+Homing_height_reduce = 0.1  ####bending knee
 
 q_cmd = np.zeros(num_actuated_joint)
 q_cmd_pre = np.zeros(num_actuated_joint)
@@ -243,25 +234,14 @@ n_t_homing = round(t_homing/dt)
 
 useRealTimeSimulation = 0
 pybullet.setRealTimeSimulation(useRealTimeSimulation)
-############################## enable FSR sensoring
-idFR_fsr = idFR[2]+1
-idFL_fsr = idFL[2]+1
-idRR_fsr = idRR[2]+1
-idRL_fsr = idRL[2]+1
-pybullet.enableJointForceTorqueSensor(bodyUniqueId=go1id,jointIndex=idFR_fsr,enableSensor=1)
-pybullet.enableJointForceTorqueSensor(bodyUniqueId=go1id,jointIndex=idFL_fsr,enableSensor=1)
-pybullet.enableJointForceTorqueSensor(bodyUniqueId=go1id,jointIndex=idRR_fsr,enableSensor=1)
-pybullet.enableJointForceTorqueSensor(bodyUniqueId=go1id,jointIndex=idRL_fsr,enableSensor=1)
 
 print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!pybullet load environment finishing!!!!!!!!!!!!!!!!!!!!!!!!!!")
-######################################################3
-##### Gait_Controller
-Controller_ver = Gait_Controller(urbodx = urobtx, id = go1id,verbose=True)
 
-trailDuration = 10
-prevPose = [0, 0, 0]
-prevPose1 = [0, 0, 0.446]
-hasPrevPose = 0
+######################################################
+##### Gait_Controller_estimation
+State_estimator = Gait_Controller(urbodx = urobtx, id = go1id,verbose=True)
+##### Force controller
+Force_controller = ForceCtrl(urbodx = urobtx)
 
 t=0.
 leg_FL_homing_fix = []
@@ -289,7 +269,8 @@ mesh_dirx = str(Path(__file__).parent.absolute())
 # print(col_num)
 
 
-##############For kinematics;
+##############For kinematics
+### desired leg position and velocity ##############################
 des_FR_p = np.zeros([3,1])
 des_FL_p = np.zeros([3,1])
 des_RR_p = np.zeros([3,1])
@@ -363,6 +344,7 @@ J_RR = np.zeros([3,3])
 J_RL = np.zeros([3,3])
 des_base = np.array([0, 0, 0.446])
 des_base_vel = np.zeros(3)
+base_R = np.zeros([3,1])
 h_com = 0
 Torque_cmd = np.zeros([num_actuated_joint,N_gait])
 
@@ -377,8 +359,13 @@ kdCartesian = np.diag([40] * 3)
 
 Torque_measured = np.zeros([num_actuated_joint,N_gait])
 FSR_measured = np.zeros([num_actuated_joint,N_gait])
-Torque_gravity = 0.8
 
+Torque_gravity = 0.8
+Gravity_comp = np.zeros(num_actuated_joint)
+Gravity_comp[0] = Torque_gravity
+Gravity_comp[joint_perLeg] = Torque_gravity
+Gravity_comp[2*joint_perLeg] = -Torque_gravity
+Gravity_comp[3*joint_perLeg] = -Torque_gravity
 #### relative to base framework
 Relative_FR_pos = np.zeros(3)
 Relative_FR_vel = np.zeros(3)
@@ -388,6 +375,21 @@ Relative_RR_pos = np.zeros(3)
 Relative_RR_vel = np.zeros(3)
 Relative_RL_pos = np.zeros(3)
 Relative_RL_vel = np.zeros(3)
+Relative_FR_pos_mea = np.zeros(3)
+Relative_FR_vel_mea = np.zeros(3)
+Relative_FL_pos_mea = np.zeros(3)
+Relative_FL_vel_mea = np.zeros(3)
+Relative_RR_pos_mea = np.zeros(3)
+Relative_RR_vel_mea = np.zeros(3)
+Relative_RL_pos_mea = np.zeros(3)
+Relative_RL_vel_mea = np.zeros(3)
+### foot support stance
+FR_support = True
+FL_support = True
+RR_support = True
+RL_support = True
+
+#####
 
 ### for fsr tracking controller
 Force_tracking_kd = 0.001 * np.ones(3)
@@ -405,44 +407,69 @@ IP_Force_RL = np.zeros([3,1])
 actuatedJointtorques = np.zeros(num_actuated_joint)
 ####################################### main loop for robot gait generation and control ####################
 i = 1
-
 tx = 0
+
 
 while i<=3*n_t_homing:
     if (useRealTimeSimulation):
         t = t + dt
     else:
         t = t + dt
+    #################################### state esimation ##############################################################
+    gcom, FR_sole_pose, FL_sole_pose, RR_sole_pose, RL_sole_pose, base_pos, base_angle = State_estimator.cal_com_state()
+    links_pos, links_vel, links_acc = State_estimator.get_link_vel_vol(i,dt,links_pos_prev,links_vel_prev)
 
 
-    if(i>1):
-        Controller_ver.ankle_joint_pressure()
-        q_mea = urobtx.getActuatedJointPositions()
-        dq_mea = urobtx.getActuatedJointVelocities()
-        T_mea = urobtx.getActuatedJointtorques()
+    State_estimator.ankle_joint_pressure()
+    q_mea = urobtx.getActuatedJointPositions()
+    dq_mea = urobtx.getActuatedJointVelocities()
+    T_mea = urobtx.getActuatedJointtorques()
 
-        FR_fsr = np.array(Controller_ver.FR_sensor[0:3])
-        FL_fsr = np.array(Controller_ver.FL_sensor[0:3])
-        RR_fsr = np.array(Controller_ver.RR_sensor[0:3])
-        RL_fsr = np.array(Controller_ver.RL_sensor[0:3])
-        FSR_measured[0:3,i-1] = FR_fsr
-        FSR_measured[3:6, i - 1] = FL_fsr
-        FSR_measured[6:9,i-1] = RR_fsr
-        FSR_measured[9:12, i - 1] = RL_fsr
+    bas_pos,bas_ori = pybullet.getBasePositionAndOrientation(go1id)
+    measure_base = np.array(bas_pos)
+    bas_eular = pybullet.getEulerFromQuaternion(bas_ori)
+    for jx in range(0,3):
+        base_R[jx,0] = base_angle[jx]
+    q_FR = q_mea[0:3]
+    q_FL = q_mea[3:6]
+    q_RR = q_mea[6:9]
+    q_RL = q_mea[9:12]
+    leg_FR, J_FR = IK_leg.fk_close_form(measure_base, base_R, q_FR, 0)
+    leg_FL, J_FL = IK_leg.fk_close_form(measure_base, base_R, q_FL, 1)
+    leg_RR, J_RR = IK_leg.fk_close_form(measure_base, base_R, q_RR, 2)
+    leg_RL, J_RL = IK_leg.fk_close_form(measure_base, base_R, q_RL, 3)
 
-        Q_measure[:, i - 1] = q_mea
-        Q_velocity_measure[:, i - 1] = q_mea
-        Torque_measured[:, i - 1] = T_mea
+    for j in range(0, 3):
+        Relative_FR_pos_mea[j] = links_pos[State_estimator.FR_soleid, j] - links_pos[-1, j]
+        Relative_FR_vel_mea[j] = links_vel[State_estimator.FR_soleid, j] - links_vel[-1, j]
+        Relative_FL_pos_mea[j] = links_pos[State_estimator.FL_soleid, j] - links_pos[-1, j]
+        Relative_FL_vel_mea[j] = links_vel[State_estimator.FL_soleid, j] - links_vel[-1, j]
+        Relative_RR_pos_mea[j] = links_pos[State_estimator.RR_soleid, j] - links_pos[-1, j]
+        Relative_RR_vel_mea[j] = links_vel[State_estimator.RR_soleid, j] - links_vel[-1, j]
+        Relative_RL_pos_mea[j] = links_pos[State_estimator.RL_soleid, j] - links_pos[-1, j]
+        Relative_RL_vel_mea[j] = links_vel[State_estimator.RL_soleid, j] - links_vel[-1, j]
+
+    FR_fsr = np.array(State_estimator.FR_sensor[0:3])
+    FL_fsr = np.array(State_estimator.FL_sensor[0:3])
+    RR_fsr = np.array(State_estimator.RR_sensor[0:3])
+    RL_fsr = np.array(State_estimator.RL_sensor[0:3])
+    FSR_measured[0:3,i-1] = FR_fsr
+    FSR_measured[3:6,i-1] = FL_fsr
+    FSR_measured[6:9,i-1] = RR_fsr
+    FSR_measured[9:12,i-1] = RL_fsr
+
+    Q_measure[:, i - 1] = q_mea
+    Q_velocity_measure[:, i - 1] = q_mea
+    Torque_measured[:, i - 1] = T_mea
 
     ## stage 1:  homing pose initialization ###########
     if i<=n_t_homing:
         #### initial state for homing_pose
         Homing_pose_t = Homing_pose*math.sin(t/t_homing/2.*math.pi)
         ####### forward state calculation #############
-        ##### 0,1,2,3: FR, FL, RR, RL
         base_pos_m = prevPose1
         body_R = np.zeros([3,1])
-        if (i<=1):
+        if (i<=1): ####calculate the inital position of four legs
             q_FR = Homing_pose_t[0:3]
             q_FL = Homing_pose_t[3:6]
             q_RR = Homing_pose_t[6:9]
@@ -452,6 +479,7 @@ while i<=3*n_t_homing:
             leg_RR_homing, J_RR = IK_leg.fk_close_form(base_pos_m, body_R, q_RR, 2)
             leg_RL_homing, J_RL = IK_leg.fk_close_form(base_pos_m, body_R, q_RL, 3)
             h_com = base_pos_m[2]-(leg_FR_homing[2,0] + leg_FL_homing[2,0] + leg_RR_homing[2,0] + leg_RL_homing[2,0])/4
+
 
         des_FR_p = leg_FR_homing
         des_FL_p = leg_FL_homing
@@ -476,86 +504,18 @@ while i<=3*n_t_homing:
         Q_cmd[6:9,i-1] = q_RR[0:3]
         Q_cmd[9:12,i-1] = q_RL[0:3]
 
-        ##################################### feedback control#######################################
-        # ####################### torque command as stance foot ################################
-        # ##### test: only vertical movement
-        # Fx_total = 0
-        # Fy_total = 0
-        # Fz_total = Controller_ver.mass * (Controller_ver.g + Homing_height_acct)
-        # Force_FR[2, 0] = Fz_total * ((des_base[0] - leg_RR_homing[0,0])/(leg_FR_homing[0,0] - leg_RR_homing[0,0])) /2
-        # Force_RR[2, 0] = Fz_total * ((leg_FR_homing[0,0] - des_base[0])/(leg_FR_homing[0,0] - leg_RR_homing[0,0])) /2
-        # Force_FL[2, 0] = Force_FR[2,0]
-        # Force_RL[2, 0] = Force_RR[2,0]
-        # # if(i>1):
-        # #     Controller_ver.ankle_joint_pressure()
-        # #     FR_fsr = np.array(Controller_ver.FR_sensor[0:3])
-        # #     FL_fsr = np.array(Controller_ver.FL_sensor[0:3])
-        # #     RR_fsr = np.array(Controller_ver.RR_sensor[0:3])
-        # #     RL_fsr = np.array(Controller_ver.RL_sensor[0:3])
-        # #     if(i % 20==0):
-        # #         print("des_base:", des_base)
-        # #         #### FSR tracking control###################
-        # #         for j in range(0,3):
-        # #             Force_FR[j, 0] += Force_tracking_kd[j] * (Force_FR_old[j, 0] - FR_fsr[j])
-        # #             Force_FL[j, 0] += Force_tracking_kd[j] * (Force_FL_old[j, 0] - FL_fsr[j])
-        # #             Force_RR[j, 0] += Force_tracking_kd[j] * (Force_RR_old[j, 0] - RR_fsr[j])
-        # #             Force_RL[j, 0] += Force_tracking_kd[j] * (Force_RL_old[j, 0] - RL_fsr[j])
-        #
-        #
-        # torque_FR = -np.dot(J_FR.T, Force_FR)
-        # torque_FL = -np.dot(J_FL.T, Force_FL)
-        # torque_RR = -np.dot(J_RR.T, Force_RR)
-        # torque_RL = -np.dot(J_RL.T, Force_RL)
+        ##################################### feedback control preparation#######################################
+        for j in range(0,3):
+            Relative_FR_pos[j] = des_FR_p[j,0] - des_base[j]
+            Relative_FR_vel[j] = des_FR_v[j,0] - des_base_vel[j]
+            Relative_FL_pos[j] = des_FL_p[j,0] - des_base[j]
+            Relative_FL_vel[j] = des_FL_v[j,0] - des_base_vel[j]
+            Relative_RR_pos[j] = des_RR_p[j,0] - des_base[j]
+            Relative_RR_vel[j] = des_RR_v[j,0] - des_base_vel[j]
+            Relative_RL_pos[j] = des_RL_p[j,0] - des_base[j]
+            Relative_RL_vel[j] = des_RL_v[j,0] - des_base_vel[j]
 
-        # ####################### torque command as stance foot ################################
-        # for j in range(0,3):
-        #     Relative_FR_pos[j] = des_FR_p[j,0] - des_base[j]
-        #     Relative_FR_vel[j] = des_FR_v[j,0] - des_base_vel[j]
-        #     Relative_FL_pos[j] = des_FL_p[j,0] - des_base[j]
-        #     Relative_FL_vel[j] = des_FL_v[j,0] - des_base_vel[j]
-        #     Relative_RR_pos[j] = des_RR_p[j,0] - des_base[j]
-        #     Relative_RR_vel[j] = des_RR_v[j,0] - des_base_vel[j]
-        #     Relative_RL_pos[j] = des_RL_p[j,0] - des_base[j]
-        #     Relative_RL_vel[j] = des_RL_v[j,0] - des_base_vel[j]
-        #
-        # if(i>1):
-        #     for j in range(0, 3):
-        #         IP_Force_FR[j, 0] = IP_tracking_kp[j] *(
-        #                 Relative_FR_pos[j] -(links_pos[Controller_ver.FR_soleid, j] - links_pos[-1, j])) +IP_tracking_kd[j] *(
-        #                 Relative_FR_vel[j] -(links_vel[Controller_ver.FR_soleid, j] - links_vel[-1, j]))
-        #
-        #         IP_Force_FL[j, 0] = IP_tracking_kp[j] * (
-        #                 Relative_FL_pos[j] - (links_pos[Controller_ver.FL_soleid, j] - links_pos[-1, j])) +IP_tracking_kd[j]*(
-        #                 Relative_FL_vel[j] - (links_vel[Controller_ver.FL_soleid, j] - links_vel[-1, j]))
-        #
-        #         IP_Force_RR[j, 0] = IP_tracking_kp[j] *(
-        #                 Relative_RR_pos[j] -(links_pos[Controller_ver.RR_soleid, j] - links_pos[-1, j])) +IP_tracking_kd[j] *(
-        #                 Relative_RR_vel[j] -(links_vel[Controller_ver.RR_soleid, j] - links_vel[-1, j]))
-        #
-        #         IP_Force_RL[j, 0] = IP_tracking_kp[j] * (
-        #                 Relative_RL_pos[j] - (links_pos[Controller_ver.RL_soleid, j] - links_pos[-1, j])) +IP_tracking_kd[j]*(
-        #                 Relative_RL_vel[j] - (links_vel[Controller_ver.RL_soleid, j] - links_vel[-1, j]))
-        #
-        # torque_FR = -np.dot(J_FR.T, IP_Force_FR)
-        # torque_FL = -np.dot(J_FL.T, IP_Force_FL)
-        # torque_RR = -np.dot(J_RR.T, IP_Force_RR)
-        # torque_RL = -np.dot(J_RL.T, IP_Force_RL)
-
-        # ######################## Forward compensation#########################################3
-        # ### gravity compensation
-        # torque_FR[0,0] += Torque_gravity/2
-        # torque_RR[0,0] += Torque_gravity/2
-        # torque_FL[0,0] += (-Torque_gravity)/2
-        # torque_RL[0,0] += (-Torque_gravity)/2
-
-        # ################################### send torque command #################################
-        # Torque_cmd[0:3,i-1] = torque_FR[0:3,0]
-        # Torque_cmd[3:6,i-1] = torque_FL[0:3, 0]
-        # Torque_cmd[6:9,i-1] = torque_RR[0:3,0]
-        # Torque_cmd[9:12,i-1] = torque_RL[0:3, 0]
-
-        # control_mode
-        # if((urobtx.controlMode =='positionControl')and(i<20)):
+        # control_mode: should be  positionControl mode
         if(urobtx.controlMode == 'positionControl'):
             if (i <= 10):  ## add external torques to maintain balance since starte from singular configuration
                 pybullet.applyExternalTorque(go1id, 0, torqueObj=[0, -10, 0], flags=1)
@@ -563,40 +523,11 @@ while i<=3*n_t_homing:
             urobtx.setActuatedJointPositions(Q_cmd[:,i-1])
             q_cmd = Q_cmd[:,i-1]
         else:
-            # if (i <= 10):  ## only for toruqe control
-                # pybullet.applyExternalTorque(go1id, 0, torqueObj=[0.5, -2, 0], flags=1)
-                ## pybullet.applyExternalForce(go1id, 0, forceObj=[0, 0, -100], posObj=[0, 0, 0], flags=1)
-            # urobtx.setActuatedJointTorques(Torque_cmd[:, i - 1])
-
             Torque_cmd[:, i - 1] = torque_cmd
             urobtx.setActuatedJointTorques(torque_cmd)
 
-        gcom, FR_sole_pose, FL_sole_pose, RR_sole_pose, RL_sole_pose, base_pos, base_angle = Controller_ver.cal_com_state()
-        links_pos, links_vel, links_acc = Controller_ver.get_link_vel_vol(i,dt,links_pos_prev,links_vel_prev)
-        links_pos_prev = links_pos
-        links_vel_prev = links_vel
-
         support_flag[i] = 0  ### 0, double support, right support
-        ###################state feedback ###########################################
-        # gcom_m, right_sole_pos, left_sole_pos, base_pos_m, base_angle_m, right_ankle_force, left_ankle_force, gcop_m, support_flag, dcm_pos_m, com_vel_m,links_pos, links_vel, links_acc = \
-        # Controller_ver.state_estimation(i,dt,support_flag,links_pos_prev,links_vel_prev,gcom_pre)
 
-        # state_feedback[i,0:3] = gcom_m
-        # state_feedback[i, 3:6] = right_sole_pos
-        # state_feedback[i, 6:9] = left_sole_pos
-        # state_feedback[i, 9:15] = right_ankle_force
-        # state_feedback[i, 15:21] = left_ankle_force
-        # state_feedback[i, 21:24] = gcop_m
-        # state_feedback[i, 24:27] = dcm_pos_m
-        # state_feedback[i, 27:30] = com_vel_m
-        # state_feedback[i, 30:33] = base_pos_m
-        # state_feedback[i, 33:36] = base_angle_m
-
-        # links_pos_prev = links_pos
-        # links_vel_prev = links_vel
-        # gcom_pre = gcom_m
-        # com_feedback_base = gcom_m
-        # com_ref_base = base_pos_m
     else:
         ij = i - n_t_homing
         torque_cmd = urobtx.getActuatedJointtorques()
@@ -605,34 +536,31 @@ while i<=3*n_t_homing:
             Q_cmd[:, i - 1] = q_cmd
             Torque_cmd[:, i - 1] = torque_cmd
         else:
-            if(ij<200):
+            if(ij<200):#####falling down
                 torque_cmd = np.zeros(num_actuated_joint)
                 urobtx.setActuatedJointTorques(torque_cmd)
 
                 des_basex = pybullet.getBasePositionAndOrientation(go1id)[0]
                 des_base = np.array(des_basex)
 
-                links_pos, links_vel, links_acc = Controller_ver.get_link_vel_vol(i, dt, links_pos_prev, links_vel_prev)
-                des_FR_p[:, 0] = (links_pos[Controller_ver.FR_soleid, :]).T
-                des_FL_p[:, 0] = (links_pos[Controller_ver.FL_soleid, :]).T
-                des_RR_p[:, 0] = (links_pos[Controller_ver.RR_soleid, :]).T
-                des_RL_p[:, 0] = (links_pos[Controller_ver.RL_soleid, :]).T
+                des_FR_p[:, 0] = (links_pos[State_estimator.FR_soleid, :]).T
+                des_FL_p[:, 0] = (links_pos[State_estimator.FL_soleid, :]).T
+                des_RR_p[:, 0] = (links_pos[State_estimator.RR_soleid, :]).T
+                des_RL_p[:, 0] = (links_pos[State_estimator.RL_soleid, :]).T
 
                 Q_cmd[:, i - 1] = q_cmd
                 Torque_cmd[:, i - 1] = torque_cmd
-
-            else:
+            else: ######switching to torque control mode
                 tx = t - (t_homing + 200 * dt)
+
+                ########gait planning #######################
                 if(ij==200):
                     des_basex = pybullet.getBasePositionAndOrientation(go1id)[0]
                     des_base = np.array(des_basex)
-                    gcom, FR_sole_pose, FL_sole_pose, RR_sole_pose, RL_sole_pose, base_pos, base_angle = Controller_ver.cal_com_state()
-                    links_pos, links_vel, links_acc = Controller_ver.get_link_vel_vol(i, dt, links_pos_prev, links_vel_prev)
-
-                    des_FR_p[:, 0] = (links_pos[Controller_ver.FR_soleid, :]).T
-                    des_FL_p[:, 0] = (links_pos[Controller_ver.FL_soleid, :]).T
-                    des_RR_p[:, 0] = (links_pos[Controller_ver.RR_soleid, :]).T
-                    des_RL_p[:, 0] = (links_pos[Controller_ver.RL_soleid, :]).T
+                    des_FR_p[:, 0] = (links_pos[State_estimator.FR_soleid, :]).T
+                    des_FL_p[:, 0] = (links_pos[State_estimator.FL_soleid, :]).T
+                    des_RR_p[:, 0] = (links_pos[State_estimator.RR_soleid, :]).T
+                    des_RL_p[:, 0] = (links_pos[State_estimator.RL_soleid, :]).T
 
                 if(tx>t_homing):
                     Homing_height_t = 0.3
@@ -648,7 +576,18 @@ while i<=3*n_t_homing:
                 des_base[2] = des_basex[2] + Homing_height_t
                 des_base_vel[2] = Homing_height_velt
 
-                ########### Ik################
+
+                for j in range(0, 3):
+                    Relative_FR_pos[j] = des_FR_p[j, 0] - des_base[j]
+                    Relative_FR_vel[j] = des_FR_v[j, 0] - des_base_vel[j]
+                    Relative_FL_pos[j] = des_FL_p[j, 0] - des_base[j]
+                    Relative_FL_vel[j] = des_FL_v[j, 0] - des_base_vel[j]
+                    Relative_RR_pos[j] = des_RR_p[j, 0] - des_base[j]
+                    Relative_RR_vel[j] = des_RR_v[j, 0] - des_base_vel[j]
+                    Relative_RL_pos[j] = des_RL_p[j, 0] - des_base[j]
+                    Relative_RL_vel[j] = des_RL_v[j, 0] - des_base_vel[j]
+
+                ########### Ik ###############################
                 body_R_des = np.zeros([3, 1])
                 q_FR, J_FR = IK_leg.ik_close_form(des_base, body_R_des, des_FR_p, q_FR, 0, It_max =15, lamda=0.55)
                 q_FL, J_FL = IK_leg.ik_close_form(des_base, body_R_des, des_FL_p, q_FL, 1, It_max=15, lamda=0.55)
@@ -660,12 +599,12 @@ while i<=3*n_t_homing:
                 Q_cmd[9:12,i-1] = q_RL[0:3]
                 q_cmd = Q_cmd[:,i-1]
 
-                #################################### feedback control#######################################
-                ####################### torque command as stance foot ################################
+                q_vel_cmd = (q_cmd -q_cmd_pre)/dt
+                ####################### For distribution ################################
                 ##### test: only vertical movement
                 Fx_total = 0
                 Fy_total = 0
-                Fz_total = Controller_ver.mass * (Controller_ver.g + Homing_height_acct)
+                Fz_total = State_estimator.mass * (State_estimator.g + Homing_height_acct)
                 Force_FR[2, 0] = Fz_total * (
                             (des_base[0]  - des_RR_p[0, 0]) / (des_FR_p[0, 0] - des_RR_p[0, 0])) / 2
                 Force_RR[2, 0] = Fz_total * (
@@ -673,40 +612,20 @@ while i<=3*n_t_homing:
                 Force_FL[2, 0] = Force_FR[2, 0]
                 Force_RL[2, 0] = Force_RR[2, 0]
 
-                # Force_FR[0, 0] = Fx_total * (
-                #             (des_base[0] + Homing_height_t*0.2 - des_RR_p[0, 0]) / (des_FR_p[0, 0] - des_RR_p[0, 0])) / 2
-                # Force_RR[0, 0] = Fx_total * (
-                #             (des_FR_p[0, 0] - (des_base[0]+Homing_height_t*0.2)) / (des_FR_p[0, 0] - des_RR_p[0, 0])) / 2
-                # Force_FL[0, 0] = Force_FR[0, 0]
-                # Force_RL[0, 0] = Force_RR[0, 0]
-
-
-                torque_FR = -np.dot(J_FR.T, Force_FR)
-                torque_FL = -np.dot(J_FL.T, Force_FL)
-                torque_RR = -np.dot(J_RR.T, Force_RR)
-                torque_RL = -np.dot(J_RL.T, Force_RL)
-
-                # # ######################## Forward compensation#########################################3
-                # # ### gravity compensation
-                torque_FR[0,0] += Torque_gravity
-                torque_RR[0,0] += Torque_gravity
-                torque_FL[0,0] += (-Torque_gravity)
-                torque_RL[0,0] += (-Torque_gravity)
-
-                ####
-                q_vel_cmd = (q_cmd -q_cmd_pre)/dt
-                for ijx in range(0,4):
-                    det_torque_pd[3*ijx+0:3*ijx+3,0] = (kp * (Q_cmd[3*ijx+0:3*ijx+3,i-1] -
-                                                               Q_measure[3*ijx+0:3*ijx+3,i-1])
-                                                       - kd * (q_vel_cmd[3*ijx+0:3*ijx+3] -
-                                                               Q_velocity_measure[3*ijx+0:3*ijx+3,i-1])).T
-
-
+                ###############
+                torque_FR = Force_controller.torque_cmd(FR_support,J_FR, Force_FR,q_cmd[0:3], q_mea[0:3], q_vel_cmd[0:3], dq_mea[0:3],
+                                                        Relative_FR_pos[0:3], Relative_FR_pos_mea[0:3], Relative_FR_vel[0:3], Relative_FR_vel_mea[0:3],Gravity_comp[0:3])
+                torque_FL = Force_controller.torque_cmd(FL_support,J_FL, Force_FL,q_cmd[3:6], q_mea[3:6], q_vel_cmd[3:6], dq_mea[3:6],
+                                                        Relative_FR_pos[3:6], Relative_FR_pos_mea[3:6], Relative_FR_vel[3:6], Relative_FR_vel_mea[3:6],Gravity_comp[3:6])
+                torque_RR = Force_controller.torque_cmd(RR_support,J_RR, Force_RR,q_cmd[6:9], q_mea[6:9], q_vel_cmd[6:9], dq_mea[6:9],
+                                                        Relative_FR_pos[6:9], Relative_FR_pos_mea[6:9], Relative_FR_vel[6:9], Relative_FR_vel_mea[6:9],Gravity_comp[6:9])
+                torque_RL = Force_controller.torque_cmd(FL_support,J_RL, Force_RL,q_cmd[9:12], q_mea[9:12], q_vel_cmd[9:12], dq_mea[9:12],
+                                                        Relative_FR_pos[9:12], Relative_FR_pos_mea[9:12], Relative_FR_vel[9:12], Relative_FR_vel_mea[9:12],Gravity_comp[9:12])
                 # ################################### send torque command #################################
-                Torque_cmd[0:3, i - 1] = torque_FR[0:3, 0] + det_torque_pd[0:3,0]
-                Torque_cmd[3:6, i - 1] = torque_FL[0:3, 0] + det_torque_pd[3:6,0]
-                Torque_cmd[6:9, i - 1] = torque_RR[0:3, 0] + det_torque_pd[6:9,0]
-                Torque_cmd[9:12, i - 1] = torque_RL[0:3, 0] + det_torque_pd[9:12,0]
+                Torque_cmd[0:3, i - 1] = torque_FR[0:3]
+                Torque_cmd[3:6, i - 1] = torque_FL[0:3]
+                Torque_cmd[6:9, i - 1] = torque_RR[0:3]
+                Torque_cmd[9:12, i - 1] = torque_RL[0:3]
 
                 torque_cmd = Torque_cmd[:, i - 1]
 
@@ -806,68 +725,6 @@ while i<=3*n_t_homing:
     #         plt.plot(Gait_func._Lfootvz)
     #         plt.show()
 
-        # ############ IK-solution for the float-based humanod: providing initial guess "homing_pose" #######################
-        # ########### set endeffector id for ik using pinocchio
-        # JOINT_ID_FL = idFL[-1]
-        # JOINT_ID_FR = idFR[-1]
-        # JOINT_ID_RL = idRL[-1]
-        # JOINT_ID_RR = idRR[-1]
-        #
-        # q_ik = joint_lower_leg_ik(robot, oMdes_FL, JOINT_ID_FL, oMdes_FR, JOINT_ID_FR, oMdes_RL, JOINT_ID_RL, oMdes_RR, JOINT_ID_RR, Freebase, Homing_pose)
-        #
-        # if (i % 10 == 0):
-        #     print("q_ik_cmd:", q_ik)
-        # ######## joint command: position control mode ###########################
-        # joint_opt[i] = q_ik
-        # urobtx.setActuatedJointPositions(q_ik)
-
-
-
-        # ###################state feedback ###########################################
-        # gcom_m, right_sole_pos, left_sole_pos, base_pos_m, base_angle_m, right_ankle_force, left_ankle_force, gcop_m, support_flag, dcm_pos_m, com_vel_m,links_pos, links_vel, links_acc = \
-        # Controller_ver.state_estimation(i,dt,support_flag,links_pos_prev,links_vel_prev,gcom_pre)
-        #
-        # state_feedback[i,0:3] = gcom_m
-        # state_feedback[i, 3:6] = right_sole_pos
-        # state_feedback[i, 6:9] = left_sole_pos
-        # state_feedback[i, 9:15] = right_ankle_force
-        # state_feedback[i, 15:21] = left_ankle_force
-        # state_feedback[i, 21:24] = gcop_m
-        # state_feedback[i, 24:27] = dcm_pos_m
-        # state_feedback[i, 27:30] = com_vel_m
-        # state_feedback[i, 30:33] = base_pos_m
-        # state_feedback[i, 33:36] = base_angle_m
-        #
-        # links_pos_prev = links_pos
-        # links_vel_prev = links_vel
-        # gcom_pre = gcom_m
-        #
-        # if ((abs(base_angle_m[0]) >=20* math.pi / 180) or (abs(base_angle_m[1]) >=20* math.pi / 180) ): ### falling down
-        #     np.savetxt('/home/jiatao/anaconda3/envs/nameOfEnv/pybullet_gym/go1/go1_torque_nmpc.txt', Torque_cmd,fmt='%s', newline='\n')
-        #     np.savetxt('/home/jiatao/anaconda3/envs/nameOfEnv/pybullet_gym/go1/go1_angle_nmpc.txt', Torque_cmd,fmt='%s', newline='\n')
-        #     # np.savetxt('/home/jiatao/anaconda3/envs/nameOfEnv/pybullet_gym/go1/go1_state_est_nmpc.txt', state_feedback,fmt='%s', newline='\n')
-
-        # ################## IK-based control: in this case, we can use admittance control, preview control and PD controller for CoM control #################################33
-        # com_ref_det = np.array(des_base) - np.array(com_ref_base)
-        # com_feedback_det = np.array(gcom_m) - np.array(com_feedback_base)
-        # angle_ref_det = des_base_ori
-        # angle_feedback_det = base_angle_m
-        #
-        # det_comxxxx, det_body_anglexxxx =Controller_ver.CoM_Body_pd(dt,com_ref_det, com_feedback_det, com_ref_det_pre, com_feedback_det_pre, angle_ref_det,angle_feedback_det, angle_ref_det_pre, angle_feedback_det_pre)
-        # des_com_pos_control = det_comxxxx + np.array(des_base)
-        # det_base_angle_control = det_body_anglexxxx
-        # det_base_matrix_control = Controller_ver.RotMatrixfromEuler(det_base_angle_control)
-        # robot.model.jointPlacements[1] = pin.SE3(det_base_matrix_control, des_com_pos_control)
-        # # robot.model.jointPlacements[1] = pin.SE3(np.eye(3), des_com_pos_control)
-        #
-        # com_ref_det_pre = com_ref_det
-        # com_feedback_det_pre = com_feedback_det
-        # angle_ref_det_pre = angle_ref_det
-        # angle_feedback_det_pre = angle_feedback_det
-        #
-
-        # ###########################===========================================================
-        # ######################################################################################
 
     Force_FR_old = Force_FR
     Force_FL_old = Force_FL
@@ -877,14 +734,24 @@ while i<=3*n_t_homing:
     links_vel_prev = links_vel
     q_cmd_pre = q_cmd
 
+
     if (i==3*n_t_homing):  ### save data
-        np.savetxt('/home/jiatao/locomotion_nmpc_pybullet_python/go1/go1_measure_fsr.txt', FSR_measured,
-                   fmt='%s',newline='\n')
-        np.savetxt('/home/jiatao/locomotion_nmpc_pybullet_python/go1/go1_angle_ref.txt', Q_cmd, fmt='%s', newline='\n')
-        np.savetxt('/home/jiatao/locomotion_nmpc_pybullet_python/go1/go1_angle_mea.txt', Q_measure, fmt='%s', newline='\n')
-        np.savetxt('/home/jiatao/locomotion_nmpc_pybullet_python/go1/go1_torque_ref.txt', Torque_cmd, fmt='%s',
+
+        fsr_mea_dir = mesh_dir + '/go1/go1_measure_fsr.txt'
+        angle_ref_dir = mesh_dir + '/go1/go1_angle_ref.txt'
+        angle_mea_dir = mesh_dir + '/go1/go1_angle_mea.txt'
+        torque_ref_dir = mesh_dir + '/go1/go1_torque_ref.txt'
+        torque_mea_dir = mesh_dir + '/go1/go1_torque_mea.txt'
+
+        np.savetxt(fsr_mea_dir, FSR_measured,
+                   fmt='%s', newline='\n')
+        np.savetxt(angle_ref_dir, Q_cmd, fmt='%s',
                    newline='\n')
-        np.savetxt('/home/jiatao/locomotion_nmpc_pybullet_python/go1/go1_torque_mea.txt', Torque_measured, fmt='%s',
+        np.savetxt(angle_mea_dir, Q_measure, fmt='%s',
+                   newline='\n')
+        np.savetxt(torque_ref_dir, Torque_cmd, fmt='%s',
+                   newline='\n')
+        np.savetxt(torque_mea_dir, Torque_measured, fmt='%s',
                    newline='\n')
 
     i += 1
