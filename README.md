@@ -17,14 +17,14 @@ Reference:
    
    2,Ding, J., Xin, S., Lam, T.L. and Vijayakumar, S., 2021, May. Versatile locomotion by integrating ankle, hip, stepping, and height variation strategies. In 2021 IEEE International Conference on Robotics and Automation (ICRA) (pp. 2957-2963). IEEE.
 
-(2) Extend robots: Pinocchio test for floting-based legged robotics
+(2) Robot extend: Pinocchio test for floting-based legged robotics
 
 Reference:
 
     3,Carpentier, J., Saurel, G., Buondonno, G., Mirabel, J., Lamiraux, F., Stasse, O. and Mansard, N., 2019, January. The Pinocchio C++ library: A fast and flexible implementation of rigid body dynamics algorithms and their analytical derivatives. In 2019 IEEE/SICE International Symposium on System Integration (SII) (pp. 614-619). IEEE.
 
 
-(3) Unitree_locomotion: Torque-control framework for quadrupedal locomotion
+(3) Quadrupedal_locomotion: Torque-control framework for quadrupedal locomotion
 
 Reference:
 
